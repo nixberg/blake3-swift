@@ -3,7 +3,7 @@ import Foundation
 fileprivate extension FixedWidthInteger where Self: UnsignedInteger {
     @inline(__always)
     func rotated<T>(right count: T) -> Self where T: BinaryInteger {
-        let right = Int(truncatingIfNeeded: count) & (Self.bitWidth - 1)
+        let right = Int(truncatingIfNeeded: count) & (Self.bitWidth - 1) // Assuming Self.bitWidth is a power of two.
         let left = Self.bitWidth - right
         return (self &<< left) | (self &>> right)
     }
