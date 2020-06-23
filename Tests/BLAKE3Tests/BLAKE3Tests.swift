@@ -10,9 +10,8 @@ final class BLAKE3Tests: XCTestCase {
             let derivedKey: String
         }
         
-        let data = try Data(contentsOf: URL(fileURLWithPath: #file)
-            .deletingLastPathComponent().appendingPathComponent("vectors.json"))
-        let vectors = try JSONDecoder().decode([Vector].self, from: data)
+        let url = Bundle.module.url(forResource: "vectors", withExtension: "json")
+        let vectors = try JSONDecoder().decode([Vector].self, from: try Data(contentsOf: url!))
         
         let maxInputLength = vectors.max { $0.inputLength < $1.inputLength }!.inputLength
         let input = [UInt8](sequence(first: 0) { ($0 + 1) % 251 }.prefix(maxInputLength))
