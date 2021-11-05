@@ -1,17 +1,34 @@
-import Foundation
+import Duplex
+import EndianBytes
 
-typealias Key = SIMD8<UInt32>
-typealias Block = SIMD16<UInt32>
+typealias KeyWords = SIMD8<UInt32>
 
-public struct BLAKE3 {
-    public static let keyLength = 32
-    public static let outputLength = 32
+typealias BlockWords = SIMD16<UInt32>
+
+struct Flags: OptionSet {
+    let rawValue: UInt32
     
-    static let blockLength = 64
-    private static let chunkLength = 1024
-    private static let maximumDepth = 54
+    static let chunkStart        = Self(rawValue: 1 << 0)
+    static let chunkEnd          = Self(rawValue: 1 << 1)
+    static let parent            = Self(rawValue: 1 << 2)
+    static let root              = Self(rawValue: 1 << 3)
+    static let keyedHash         = Self(rawValue: 1 << 4)
+    static let deriveKeyContext  = Self(rawValue: 1 << 5)
+    static let deriveKeyMaterial = Self(rawValue: 1 << 6)
+}
+
+public struct BLAKE3: Duplex {
+    public typealias Output = [UInt8]
     
-    static let initializationVector = Key(
+    public static let defaultOutputByteCount = 32
+    
+    public static let keyByteCount = 32
+    
+    static let blockByteCount = 64
+    private static let chunkByteCount = 1024
+    private static let maxStackDepth = 54
+    
+    static let initializationVector = KeyWords(
         0x6a09e667,
         0xbb67ae85,
         0x3c6ef372,
@@ -22,246 +39,216 @@ public struct BLAKE3 {
         0x5be0cd19
     )
     
-    private let key: Key
+    private let key: KeyWords
     private let flags: Flags
-    private var currentChunk: ChunkState
-    private var stack: [Key] = []
     
-    private init(key: Key, flags: Flags) {
+    private var currentChunk: ChunkState
+    private var stack: [KeyWords] = []
+    
+    private var isDone = false
+    
+    init(key: KeyWords, flags: Flags) {
         self.key = key
         self.flags = flags
         currentChunk = ChunkState(key, counter: 0, flags: flags)
-        stack.reserveCapacity(Self.maximumDepth)
     }
     
     public init() {
         self.init(key: Self.initializationVector, flags: [])
     }
     
-    public init<D>(withKey key: D) where D: DataProtocol {
-        precondition(key.count == Self.keyLength)
-        self.init(key: Key(fromLittleEndianBytes: key), flags: .keyedHash)
-    }
-    
-    public init<S>(derivingKeyWithContext context: S) where S: StringProtocol {
-        var hash = Self(key: Self.initializationVector, flags: .deriveKeyContext)
-        hash.update(with: ArraySlice(context.utf8))
-        self.init(key: Key(fromLittleEndianBytes: hash.finalize()), flags: .deriveKeyMaterial)
-    }
-    
-    public mutating func update<D>(with input: D) where D : DataProtocol {
-        var input = input[...]
+    public mutating func absorb<Bytes>(contentsOf bytes: Bytes)
+    where Bytes: Sequence, Bytes.Element == UInt8 {
+        precondition(!isDone)
         
-        while !input.isEmpty {
-            if currentChunk.count == Self.chunkLength {
+        for byte in bytes {
+            if currentChunk.count == Self.chunkByteCount {
                 let counter = currentChunk.counter + 1
                 
-                var chainingValue = currentChunk.output().chainingValue()
-                for _ in 0..<counter.trailingZeroBitCount {
-                    chainingValue = Output(key: key, left: stack.popLast()!, right: chainingValue, flags: flags).chainingValue()
-                }
+                let chainingValue = stack
+                    .reversed()
+                    .prefix(counter.trailingZeroBitCount)
+                    .reduce(TheOutput(currentChunk).chainingValue) {
+                        TheOutput(key: key, left: $1, right: $0, flags: flags).chainingValue
+                    }
+                
+                stack.removeLast(counter.trailingZeroBitCount)
                 stack.append(chainingValue)
                 
                 currentChunk.reset(key: key, counter: counter)
             }
             
-            let bytesWanted = Self.chunkLength - currentChunk.count
-            currentChunk.update(with: input.prefix(bytesWanted))
-            input = input.dropFirst(bytesWanted)
+            currentChunk.absorb(byte)
         }
     }
     
-    public func finalize<M>(to output: inout M, count: Int) where M: MutableDataProtocol {
-        stack.reversed().reduce(currentChunk.output()) {
-            Output(key: key, left: $1, right: $0.chainingValue(), flags: flags)
-        }.writeRootBytes(to: &output, count: count)
+    public mutating func squeeze<Output>(to output: inout Output, outputByteCount: Int)
+    where Output: RangeReplaceableCollection, Output.Element == UInt8 {
+        precondition(!isDone)
+        precondition(outputByteCount > 0)
+        
+        stack
+            .reversed()
+            .reduce(TheOutput(currentChunk)) {
+                TheOutput(key: key, left:  $1, right: $0.chainingValue, flags: flags)
+            }
+            .writeRootBytes(to: &output, outputByteCount: outputByteCount)
+        
+        stack.removeAll()
+        isDone = true
     }
     
-    public func finalize(count: Int = Self.outputLength) -> [UInt8] {
+    public mutating func squeeze(outputByteCount: Int) -> [UInt8] {
         var output: [UInt8] = []
-        output.reserveCapacity(count)
-        self.finalize(to: &output, count: count)
+        output.reserveCapacity(outputByteCount)
+        self.squeeze(to: &output, outputByteCount: outputByteCount)
         return output
     }
-}
-
-struct Flags: OptionSet {
-    let rawValue: UInt32
-    
-    static let chunkStart        = Flags(rawValue: 1 << 0)
-    static let chunkEnd          = Flags(rawValue: 1 << 1)
-    static let parent            = Flags(rawValue: 1 << 2)
-    static let root              = Flags(rawValue: 1 << 3)
-    static let keyedHash         = Flags(rawValue: 1 << 4)
-    static let deriveKeyContext  = Flags(rawValue: 1 << 5)
-    static let deriveKeyMaterial = Flags(rawValue: 1 << 6)
 }
 
 public extension BLAKE3 {
-    static func hash<D, M>(_ input: D, to output: inout M, count: Int = BLAKE3.outputLength)
-        where D: DataProtocol, M: MutableDataProtocol {
-        var hash = BLAKE3()
-        hash.update(with: input)
-        hash.finalize(to: &output, count: count)
+    init<Key>(key: Key) where Key: Collection, Key.Element == UInt8 {
+        precondition(key.count == Self.keyByteCount, "TODO")
+        self.init(key: KeyWords(littleEndianBytes: key)!, flags: .keyedHash)
     }
     
-    static func hash<D>(_ input: D, count: Int = BLAKE3.outputLength) -> [UInt8] where D: DataProtocol {
+    init<Context>(derivingKeyWithContext context: Context) where Context: StringProtocol {
+        var hash = Self(key: Self.initializationVector, flags: .deriveKeyContext)
+        hash.absorb(contentsOf: context.utf8)
+        self.init(key: KeyWords(littleEndianBytes: hash.squeeze())!, flags: .deriveKeyMaterial)
+    }
+    
+    static func hash<Bytes, Key, Output>(
+        contentsOf bytes: Bytes,
+        withKey key: Key,
+        to output: inout Output,
+        outputByteCount: Int = Self.defaultOutputByteCount
+    ) where
+        Bytes: Sequence, Bytes.Element == UInt8,
+        Key: Collection, Key.Element == UInt8,
+        Output: RangeReplaceableCollection, Output.Element == UInt8
+    {
+        var hash = Self(key: key)
+        hash.absorb(contentsOf: bytes)
+        hash.squeeze(to: &output, outputByteCount: outputByteCount)
+    }
+    
+    static func hash<Bytes, Key>(
+        contentsOf bytes: Bytes,
+        withKey key: Key,
+        outputByteCount: Int = Self.defaultOutputByteCount
+    ) -> Self.Output where
+        Bytes: Sequence, Bytes.Element == UInt8,
+        Key: Collection, Key.Element == UInt8
+    {
         var output: [UInt8] = []
-        output.reserveCapacity(count)
-        hash(input, to: &output, count: count)
+        output.reserveCapacity(outputByteCount)
+        Self.hash(contentsOf: bytes, withKey: key, to: &output, outputByteCount: outputByteCount)
         return output
     }
     
-    static func hash<D, K, M>(_ input: D, withKey key: K, to output: inout M, count: Int = BLAKE3.outputLength)
-        where D: DataProtocol, K: DataProtocol, M: MutableDataProtocol {
-        var hash = BLAKE3(withKey: key)
-        hash.update(with: input)
-        hash.finalize(to: &output, count: count)
+    static func deriveKey<Bytes, Context, Output>(
+        fromContentsOf bytes: Bytes,
+        withContext context: Context,
+        to output: inout Output,
+        outputByteCount: Int = Self.defaultOutputByteCount
+    ) where
+        Bytes: Sequence, Bytes.Element == UInt8,
+        Context: StringProtocol,
+        Output: RangeReplaceableCollection, Output.Element == UInt8
+    {
+        var hash = Self(derivingKeyWithContext: context)
+        hash.absorb(contentsOf: bytes)
+        hash.squeeze(to: &output, outputByteCount: outputByteCount)
     }
     
-    static func hash<D, K>(_ input: D, withKey key: K, count: Int = BLAKE3.outputLength) -> [UInt8] where D: DataProtocol, K: DataProtocol {
+    static func deriveKey<Bytes, Context>(
+        fromContentsOf bytes: Bytes,
+        withContext context: Context,
+        outputByteCount: Int = Self.defaultOutputByteCount
+    ) -> Self.Output where
+        Bytes: Sequence, Bytes.Element == UInt8,
+        Context: StringProtocol
+    {
         var output: [UInt8] = []
-        output.reserveCapacity(count)
-        hash(input, withKey: key, to: &output, count: count)
-        return output
-    }
-    
-    static func deriveKey<D, S, M>(from input: D, withContext context: S, to output: inout M, count: Int = BLAKE3.outputLength)
-        where D: DataProtocol, S: StringProtocol, M: MutableDataProtocol {
-        var hash = BLAKE3(derivingKeyWithContext: context)
-        hash.update(with: input)
-        hash.finalize(to: &output, count: count)
-    }
-    
-    static func deriveKey<D, S>(from input: D, withContext context: S, count: Int = BLAKE3.outputLength) -> [UInt8] where D: DataProtocol, S: StringProtocol {
-        var output: [UInt8] = []
-        output.reserveCapacity(count)
-        deriveKey(from: input, withContext: context, to: &output, count: count)
+        output.reserveCapacity(outputByteCount)
+        Self.deriveKey(
+            fromContentsOf: bytes,
+            withContext: context,
+            to: &output,
+            outputByteCount: outputByteCount)
         return output
     }
 }
 
-fileprivate struct ChunkState {
-    private var chainingValue: Key
-    var counter: UInt64
-    private var block: [UInt8]
-    private var compressedBlocks: Int
-    private let flags: Flags
-    
-    var count: Int {
-        compressedBlocks * BLAKE3.blockLength + block.count
-    }
-    
-    private var startFlag: Flags {
-        compressedBlocks == 0 ? .chunkStart : []
-    }
-    
-    init(_ key: Key, counter: UInt64, flags: Flags) {
-        chainingValue = key
-        self.counter = counter
-        block = []
-        block.reserveCapacity(BLAKE3.blockLength)
-        compressedBlocks = 0
-        self.flags = flags
-    }
-    
-    mutating func reset(key: Key, counter: UInt64) {
-        chainingValue = key
-        self.counter = counter
-        block.removeAll(keepingCapacity: true)
-        compressedBlocks = 0
-    }
-    
-    mutating func update<D>(with input: D) where D: DataProtocol {
-        var input = input[...]
-        
-        while !input.isEmpty {
-            if block.count == BLAKE3.blockLength {
-                chainingValue = Block(fromLittleEndianBytes: block).compressed(
-                    with: chainingValue,
-                    blockLength: BLAKE3.blockLength,
-                    counter: counter,
-                    flags: flags.union(startFlag)
-                ).lowHalf
-                
-                compressedBlocks += 1
-                block.removeAll(keepingCapacity: true)
-            }
-            
-            let bytesWanted = BLAKE3.blockLength - block.count
-            block.append(contentsOf: input.prefix(bytesWanted))
-            input = input.dropFirst(bytesWanted)
-        }
-    }
-    
-    func output() -> Output {
-        Output(
-            inputChainingValue: chainingValue,
-            block: Block(fromLittleEndianBytes: block),
-            blockLength: block.count,
-            counter: counter,
-            flags: flags.union(startFlag).union(.chunkEnd)
-        )
-    }
-}
-
-fileprivate struct Output {
-    private let inputChainingValue: Key
-    private let block: Block
-    private let blockLength: Int
-    private let counter: UInt64
-    private let flags: Flags
-    
-    init(inputChainingValue: Key, block: Block, blockLength: Int, counter: UInt64, flags: Flags) {
-        self.inputChainingValue = inputChainingValue
-        self.block = block
-        self.blockLength = blockLength
-        self.counter = counter
-        self.flags = flags
-    }
-    
-    init(key: Key, left leftChild: Key, right rightChild: Key, flags: Flags) {
-        inputChainingValue = key
-        block = Block(lowHalf: leftChild, highHalf: rightChild)
-        blockLength = BLAKE3.blockLength
-        counter = 0
-        self.flags = flags.union(.parent)
-    }
-    
-    func chainingValue() -> Key {
-        block.compressed(with: inputChainingValue, blockLength: blockLength, counter: counter, flags: flags).lowHalf
-    }
-    
-    func writeRootBytes<M>(to output: inout M, count: Int) where M: MutableDataProtocol {
-        var count = count
-        var outputBlockCounter: UInt64 = 0
-        
-        while count > 0 {
-            let words = block.compressed(
-                with: inputChainingValue,
-                blockLength: blockLength,
-                counter: outputBlockCounter,
-                flags: flags.union(.root)
+extension BlockWords {
+    func compressed(
+        with chainingValue: KeyWords,
+        blockLength: Int,
+        counter: UInt64,
+        flags: Flags
+    ) -> Self {
+        var state = BlockWords(
+            lowHalf: chainingValue,
+            highHalf: SIMD8(
+                lowHalf: BLAKE3.initializationVector.lowHalf,
+                highHalf: SIMD4(
+                    UInt32(truncatingIfNeeded: counter),
+                    UInt32(truncatingIfNeeded: counter >> 32),
+                    UInt32(blockLength),
+                    flags.rawValue
+                )
             )
-            
-            for index in 0..<min(count, BLAKE3.blockLength) {
-                let (i, j) = index.quotientAndRemainder(dividingBy: 4)
-                output.append(UInt8(truncatingIfNeeded: words[i] &>> (8 * j)))
-            }
-            
-            count -= BLAKE3.blockLength
-            outputBlockCounter += 1
+        )
+        var message = self
+        
+        for _ in 1...7 {
+            state.round(with: message)
+            message.permute()
         }
+        
+        state.lowHalf ^= state.highHalf
+        state.highHalf ^= chainingValue
+        
+        return state
+    }
+    
+    @inline(__always)
+    private mutating func round(with message: BlockWords) {
+        self.quarterRound(00, 04, 08, 12, message[00], message[01])
+        self.quarterRound(01, 05, 09, 13, message[02], message[03])
+        self.quarterRound(02, 06, 10, 14, message[04], message[05])
+        self.quarterRound(03, 07, 11, 15, message[06], message[07])
+        
+        self.quarterRound(00, 05, 10, 15, message[08], message[09])
+        self.quarterRound(01, 06, 11, 12, message[10], message[11])
+        self.quarterRound(02, 07, 08, 13, message[12], message[13])
+        self.quarterRound(03, 04, 09, 14, message[14], message[15])
+    }
+    
+    @inline(__always)
+    private mutating func quarterRound(_ a: Int, _ b: Int, _ c: Int, _ d: Int, _ x: UInt32, _ y: UInt32) {
+        self[a] &+= self[b] &+ x
+        self[d] = (self[d] ^ self[a]).rotated(right: 16)
+        self[c] &+= self[d]
+        self[b] = (self[b] ^ self[c]).rotated(right: 12)
+        
+        self[a] &+= self[b] &+ y
+        self[d] = (self[d] ^ self[a]).rotated(right: 08)
+        self[c] &+= self[d]
+        self[b] = (self[b] ^ self[c]).rotated(right: 07)
+    }
+    
+    @inline(__always)
+    private mutating func permute() {
+        self = self[SIMD16(2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8)]
     }
 }
 
-fileprivate extension SIMD where Scalar: FixedWidthInteger & UnsignedInteger {
-    init<D>(fromLittleEndianBytes data: D) where D: DataProtocol {
-        assert(data.count <= MemoryLayout<Self>.size)
-        self.init()
-        for (index, byte) in data.enumerated() {
-            let (i, j) = index.quotientAndRemainder(dividingBy: MemoryLayout<Scalar>.size)
-            self[i] |= Scalar(byte) &<< (8 * j)
-        }
+// TODO: Remove when availible in Numerics.
+fileprivate extension UInt32 {
+    @inline(__always)
+    func rotated(right count: Int) -> Self {
+        (self &<< (Self.bitWidth - count)) | (self &>> count)
     }
 }

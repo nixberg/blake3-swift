@@ -3,4 +3,5 @@
 /Packages
 /*.xcodeproj
 xcuserdata/
-/.swiftpm
+DerivedData/
+.swiftpm/xcode/
