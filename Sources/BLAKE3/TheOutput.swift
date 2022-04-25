@@ -11,7 +11,7 @@ struct TheOutput {
     init(_ chunkState: ChunkState) {
         inputChainingValue = chunkState.chainingValue
         block = BlockWords(littleEndianBytes:
-                            chunkState.block.paddingEnd(with: 0, toCount: BLAKE3.blockByteCount))!
+                            chunkState.block.paddingEnd(with: 0, toCount: BLAKE3.blockByteCount))
         blockLength = chunkState.block.count
         counter = chunkState.counter
         flags = chunkState.flags.union(chunkState.startFlag).union(.chunkEnd)

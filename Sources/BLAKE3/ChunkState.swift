@@ -35,7 +35,7 @@ struct ChunkState {
         assert((0...BLAKE3.blockByteCount).contains(block.count))
         
         if block.count == BLAKE3.blockByteCount {
-            chainingValue = BlockWords(littleEndianBytes: block)!.compressed(
+            chainingValue = BlockWords(littleEndianBytes: block).compressed(
                 with: chainingValue,
                 blockLength: BLAKE3.blockByteCount,
                 counter: counter,
@@ -56,7 +56,7 @@ struct ChunkState {
         
         while !bytes.isEmpty {
             if block.count == BLAKE3.blockByteCount {
-                chainingValue = BlockWords(littleEndianBytes: block)!.compressed(
+                chainingValue = BlockWords(littleEndianBytes: block).compressed(
                     with: chainingValue,
                     blockLength: BLAKE3.blockByteCount,
                     counter: counter,

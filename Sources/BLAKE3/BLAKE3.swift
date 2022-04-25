@@ -109,13 +109,13 @@ public struct BLAKE3: Duplex {
 public extension BLAKE3 {
     init<Key>(key: Key) where Key: Collection, Key.Element == UInt8 {
         precondition(key.count == Self.keyByteCount, "TODO")
-        self.init(key: KeyWords(littleEndianBytes: key)!, flags: .keyedHash)
+        self.init(key: KeyWords(littleEndianBytes: key), flags: .keyedHash)
     }
     
     init<Context>(derivingKeyWithContext context: Context) where Context: StringProtocol {
         var hash = Self(key: Self.initializationVector, flags: .deriveKeyContext)
         hash.absorb(contentsOf: context.utf8)
-        self.init(key: KeyWords(littleEndianBytes: hash.squeeze())!, flags: .deriveKeyMaterial)
+        self.init(key: KeyWords(littleEndianBytes: hash.squeeze()), flags: .deriveKeyMaterial)
     }
     
     static func hash<Bytes, Key, Output>(
