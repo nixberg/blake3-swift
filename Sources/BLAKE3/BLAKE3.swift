@@ -1,5 +1,5 @@
 import Duplex
-import EndianBytes
+import SIMDEndianBytes
 
 typealias KeyWords = SIMD8<UInt32>
 

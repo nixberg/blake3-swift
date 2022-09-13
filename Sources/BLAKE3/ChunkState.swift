@@ -1,4 +1,4 @@
-import EndianBytes
+import SIMDEndianBytes
 
 struct ChunkState {
     var chainingValue: KeyWords

@@ -11,9 +11,10 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-algorithms", from: "1.0.0"),
-        .package(url: "https://github.com/nixberg/crypto-traits-swift", from: "0.2.1"),
-        .package(url: "https://github.com/nixberg/endianbytes-swift", from: "0.4.0"),
-        .package(url: "https://github.com/nixberg/hexstring-swift", from: "0.2.0"),
+        
+        .package(url: "https://github.com/nixberg/crypto-traits-swift", "0.2.1"..<"0.3.0"),
+        .package(url: "https://github.com/nixberg/endianbytes-swift", "0.5.0"..<"0.6.0"),
+        .package(url: "https://github.com/nixberg/hexstring-swift", "0.5.0"..<"0.6.0"),
     ],
     targets: [
         .target(
