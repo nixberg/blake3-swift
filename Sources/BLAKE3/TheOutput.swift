@@ -1,5 +1,5 @@
 import Algorithms
-import EndianBytes
+import SIMDEndianBytes
 
 struct TheOutput {
     private let inputChainingValue: KeyWords

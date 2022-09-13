@@ -10,6 +10,7 @@ let package = Package(
             targets: ["BLAKE3"]),
     ],
     dependencies: [
+        .package(url: "https://github.com/apple/swift-algorithms", from: "1.0.0"),
         .package(url: "https://github.com/nixberg/crypto-traits-swift", from: "0.2.1"),
         .package(url: "https://github.com/nixberg/endianbytes-swift", from: "0.4.0"),
         .package(url: "https://github.com/nixberg/hexstring-swift", from: "0.2.0"),
@@ -18,8 +19,9 @@ let package = Package(
         .target(
             name: "BLAKE3",
             dependencies: [
+                .product(name: "Algorithms", package: "swift-algorithms"),
                 .product(name: "Duplex", package: "crypto-traits-swift"),
-                .product(name: "EndianBytes", package: "endianbytes-swift"),
+                .product(name: "SIMDEndianBytes", package: "endianbytes-swift"),
             ]),
         .testTarget(
             name: "BLAKE3Tests",
