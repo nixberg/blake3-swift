@@ -1,5 +1,5 @@
-[![Swift](https://github.com/nixberg/blake3-swift/actions/workflows/swift.yml/badge.svg)](
-https://github.com/nixberg/blake3-swift/actions/workflows/swift.yml)
+[![Swift](https://github.com/nixberg/blake3-swift/actions/workflows/swift.yaml/badge.svg)](
+https://github.com/nixberg/blake3-swift/actions/workflows/swift.yaml)
 
 # BLAKE3
 
