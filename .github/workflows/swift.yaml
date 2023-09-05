@@ -12,8 +12,8 @@ jobs:
     
     strategy:
       matrix:
-        os: [macos-12, ubuntu-latest]
-        swift-version: ["5.6", "5.7"]
+        os: ["macos-latest", "ubuntu-latest"]
+        swift-version: ["5"]
     
     runs-on: ${{ matrix.os }}
 
@@ -21,7 +21,7 @@ jobs:
     - uses: swift-actions/setup-swift@v1
       with:
         swift-version: ${{ matrix.swift-version }}
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Build
       run: swift build
     - name: Run tests
